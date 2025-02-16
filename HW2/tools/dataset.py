@@ -31,7 +31,7 @@ else:
     import pickle
 
 from torch.utils.data import Dataset as VisionDataset
-from tools.utils import check_integrity, download_and_extract_archive
+from HW2.tools.utils import check_integrity, download_and_extract_archive
 
 import shutil
 
