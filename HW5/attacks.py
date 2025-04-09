@@ -31,64 +31,106 @@ def PGD_attack(model, device, dat, lbl, eps, alpha, iters, rand_start):
 
     # x_nat is the natural (clean) data batch, we .clone().detach()
     # to copy it and detach it from our computational graph
-    x_nat = dat.clone().detach()
+    x_nat = dat.clone().detach().to(device)
 
     # If rand_start is True, add uniform noise to the sample within [-eps,+eps],
     # else just copy x_nat
+    if rand_start:
+        noise = torch.empty_like(x_nat).uniform_(-eps, eps)
+        x_adv = torch.clamp(x_nat + noise, 0.0, 1.0)
+    else:
+        x_adv = x_nat.clone().detach()
 
     # Make sure the sample is projected into original distribution bounds [0,1]
 
     # Iterate over iters
-
+    for i in range(iters):
         # Compute gradient w.r.t. data (we give you this function, but understand it)
-
+        data_grad = gradient_wrt_data(model, device, x_adv, lbl)
         # Perturb the image using the gradient
-
+        x_adv = x_adv + alpha * data_grad.sign()
         # Clip the perturbed datapoints to ensure we still satisfy L_infinity constraint
-
+        x_adv = torch.clamp(x_adv, x_nat - eps, x_nat + eps)
         # Clip the perturbed datapoints to ensure we are in bounds [0,1]
-
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
     # Return the final perturbed samples
-    return 0
+    return x_adv
 
 
 def FGSM_attack(model, device, dat, lbl, eps):
     # TODO: Implement the FGSM attack
     # - Dat and lbl are tensors
     # - eps is a float
+    x_nat = dat.clone().detach().to(device)
+    x_nat.requires_grad = True
+    out = model(x_nat)
+    loss = F.cross_entropy(out, lbl)
+    model.zero_grad()
+    loss.backward()
+    data_grad = x_nat.grad.data
+    x_adv = x_nat + eps * data_grad.sign()
+    x_adv = torch.clamp(x_adv, 0.0, 1.0)
 
-    # HINT: FGSM is a special case of PGD
-
-    return 0
+    return x_adv.detach()
 
 
 def rFGSM_attack(model, device, dat, lbl, eps):
     # TODO: Implement the FGSM attack
     # - Dat and lbl are tensors
     # - eps is a float
-
-    # HINT: rFGSM is a special case of PGD
-
-    return 0
+    # Clone and detach the original data
+    x_nat = dat.clone().detach().to(device)
+    alpha = eps / 2 
+    rand_perturb = torch.FloatTensor(x_nat.shape).uniform_(-alpha, alpha).to(device)
+    x_adv = x_nat + rand_perturb
+    x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    x_adv.requires_grad = True
+    out = model(x_adv)
+    loss = F.cross_entropy(out, lbl)
+    model.zero_grad()
+    loss.backward()
+    data_grad = x_adv.grad.data
+    x_adv = x_adv + (eps - alpha) * data_grad.sign()
+    x_adv = torch.max(torch.min(x_adv, x_nat + eps), x_nat - eps)
+    x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    return x_adv.detach()
 
 
 def FGM_L2_attack(model, device, dat, lbl, eps):
     # x_nat is the natural (clean) data batch, we .clone().detach()
     # to copy it and detach it from our computational graph
-    x_nat = dat.clone().detach()
+    x_nat = dat.clone().detach().to(device)
+    x_nat.requires_grad = True
 
-    # Compute gradient w.r.t. data
+    # Forward pass
+    out = model(x_nat)
+    loss = F.cross_entropy(out, lbl)
 
-    # Compute sample-wise L2 norm of gradient (L2 norm for each batch element)
-    # HINT: Flatten gradient tensor first, then compute L2 norm
+    # Zero all existing gradients
+    model.zero_grad()
 
-    # Perturb the data using the gradient
-    # HINT: Before normalizing the gradient by its L2 norm, use
-    # torch.clamp(l2_of_grad, min=1e-12) to prevent division by 0
+    # Backward pass to compute gradients w.r.t. input data
+    loss.backward()
+    data_grad = x_nat.grad.data 
 
-    # Add perturbation the data
+    # Flatten gradient per sample and compute L2 norm
+    batch_size = data_grad.shape[0]
+    data_grad_flat = data_grad.view(batch_size, -1) 
 
-    # Clip the perturbed datapoints to ensure we are in bounds [0,1]
+    # Compute L2 norm for each sample
+    l2_norm = torch.norm(data_grad_flat, p=2, dim=1)
+    l2_norm = l2_norm.view(batch_size, 1, 1, 1) 
 
-    # Return the perturbed samples
-    return 0
+    # Prevent division by zero
+    l2_norm = torch.clamp(l2_norm, min=1e-12)
+
+    # Normalize the gradient
+    grad_normalized = data_grad / l2_norm
+
+    # Perturb the data
+    x_adv = x_nat + eps * grad_normalized
+
+    # Clip to maintain [0,1] range
+    x_adv = torch.clamp(x_adv, 0.0, 1.0)
+
+    return x_adv.detach()

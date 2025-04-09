@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class NetA(nn.Module):
     def __init__(self,num_classes=10):
         super(NetA, self).__init__()
